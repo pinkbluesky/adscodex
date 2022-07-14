@@ -1,56 +1,58 @@
 package l2
 
 import (
-	"errors"
-	"fmt"
-	"math/rand"
-	"runtime"
-	"crypto/sha1"
-	"hash/crc64"
-	"math"
-	"os"
-	"sync"
-	"adscodex/oligo"
 	"adscodex/criteria"
 	"adscodex/l0"
 	"adscodex/l1"
+	"adscodex/oligo"
+	"crypto/sha1"
+	"errors"
+	"fmt"
+	"hash/crc64"
+	"math"
+	"math/rand"
+	"os"
+	"runtime"
+	"sync"
+
 	"github.com/klauspost/reedsolomon"
 )
 
 // Level 2 codec
 type Codec struct {
 	// settings
-	p5, p3	oligo.Oligo	// 5'-end and 3'-end primers
-	dblknum int		// number of data blocks in an oligo
-	dseqnum	int		// number of data sequences
-	rseqnum	int		// number of erasure sequences
-	compat	bool		// if true, use the 0.9 file format
-	rndmz	bool		// if true, randomize the data
+	p5, p3  oligo.Oligo // 5'-end and 3'-end primers
+	dblknum int         // number of data blocks in an oligo
+	dseqnum int         // number of data sequences
+	rseqnum int         // number of erasure sequences
+	compat  bool        // if true, use the 0.9 file format
+	rndmz   bool        // if true, randomize the data
+	rndseed uint64      // random seed for PNRG
 
-	c1	*l1.Codec
-	ec	reedsolomon.Encoder
+	c1 *l1.Codec
+	ec reedsolomon.Encoder
 
-	verbose	bool		// print information about sequences
+	verbose bool // print information about sequences
 }
 
 // Data extent
 // Describes a sequential range of data recovered
 type DataExtent struct {
-	Offset		uint64
-	Data		[]byte
-	Type		int		// FileVerified, FileUnverified, or FileBestGuess
+	Offset uint64
+	Data   []byte
+	Type   int // FileVerified, FileUnverified, or FileBestGuess
 }
 
 // for debugging
 type DecRecord struct {
-	Addr	uint64			// address if ec oligos are counted after the data oligos in a group
-	Ecgrp	uint64
-	Ecrow	uint64
-	Lvl	int
-	Ol	oligo.Oligo
-	Data	[][]byte
-	Oaddr	int64			// the actual address in the oligo, negative if EC oligo
-	Offset	int64			// file offset (-1 for non-data oligoes like EC oligos or superblocks)
+	Addr   uint64 // address if ec oligos are counted after the data oligos in a group
+	Ecgrp  uint64
+	Ecrow  uint64
+	Lvl    int
+	Ol     oligo.Oligo
+	Data   [][]byte
+	Oaddr  int64 // the actual address in the oligo, negative if EC oligo
+	Offset int64 // file offset (-1 for non-data oligoes like EC oligos or superblocks)
 }
 
 var Eec = errors.New("parity blocks don't match")
@@ -125,9 +127,12 @@ func (c *Codec) SetErrorModel(fname string, maxerrs int) (err error) {
 	return c.c1.SetErrorModel(fname, maxerrs)
 }
 
-
 func (c *Codec) MaxAddr() uint64 {
 	return c.c1.MaxAddr()
+}
+
+func (c *Codec) SetRandomSeed(rndseed uint64) {
+	c.rndseed = rndseed
 }
 
 // Encodes logical data into a collection of oligos.
@@ -147,11 +152,11 @@ func (c *Codec) Encode(addr uint64, data []byte) (nextaddr uint64, oligos []olig
 	}
 
 	// first add the superblocks
-	nd, super := c.addSupers(data)
+	nd, super := c.addSupers(data) // nd is the superblocked data, super is the OG superblock
 
 	// then pad the data at the back so it's multiple of the data per erasure group
 	egsz := ecGroupDataSize(blksz, blknum, c.dseqnum)
-	if (len(nd) + len(super))%egsz != 0 {
+	if (len(nd)+len(super))%egsz != 0 {
 		n := egsz - ((len(nd) + len(super)) % egsz)
 		for i := 0; i < n; i++ {
 			nd = append(nd, byte(rand.Int31n(256)))
@@ -196,7 +201,7 @@ func (c *Codec) Encode(addr uint64, data []byte) (nextaddr uint64, oligos []olig
 			}
 
 			oligos = append(oligos, o)
-//			fmt.Fprintf(os.Stderr, "%d %v %v\n", a, e, o)
+			//			fmt.Fprintf(os.Stderr, "%d %v %v\n", a, e, o)
 		}
 
 		addr += uint64(ecgrpaddr)
@@ -207,24 +212,32 @@ func (c *Codec) Encode(addr uint64, data []byte) (nextaddr uint64, oligos []olig
 	return
 }
 
+// super []byte is the OG superblock that contains the whole data size, the sha1 sum of the entire data...
+// nd []byte the entirely superblocked data
 func (c *Codec) addSupers(data []byte) (nd []byte, super []byte) {
 	datasz := uint64(len(data))
 
 	if c.rndmz {
-		rnd := rand.New(rand.NewSource(int64(datasz)))
-		for i := 0; i < len(data); i++ {
-			r := byte(rnd.Int31n(256))
-			data[i] ^= r
+
+		rndseed := c.rndseed
+		if rndseed == 0 { // if no specified random seed, use default
+			rndseed = datasz
 		}
 
-	}
+		rnd := rand.New(rand.NewSource(int64(rndseed))) // create randomnizer with data size as seed
+		for i := 0; i < len(data); i++ {
+			r := byte(rnd.Int31n(256)) // get a new random byte from the PRNG
+			data[i] ^= r               // XOR each byte of data with the random byte
+		}
+
+	} // the data gets randomized; the superblock (and intermediate superblocks) are not
 
 	// start with the superblock
-	super = l0.Pint64(datasz, super)			// "file" size
+	super = l0.Pint64(datasz, super) // "file" size
 	s := sha1.Sum(data)
-	super = append(super, s[:]...)				// SHA1 sum for the whole "file"
+	super = append(super, s[:]...) // SHA1 sum for the whole "file"
 	crc := crc64.Checksum(super, crctbl)
-	super = l0.Pint64(crc, super)				// CRC64 of the superblock
+	super = l0.Pint64(crc, super) // CRC64 of the superblock
 
 	nd = append(nd, super...)
 	for len(data) > 0 {
@@ -238,11 +251,11 @@ func (c *Codec) addSupers(data []byte) (nd []byte, super []byte) {
 
 		// append the intermediate superblock
 		p := len(nd)
-		nd = l0.Pint64(datasz, nd)				// "file" size
+		nd = l0.Pint64(datasz, nd) // "file" size
 		s = sha1.Sum(data[0:sz])
-		nd = append(nd, s[:]...)				// SHA1 sum for the data chunk
+		nd = append(nd, s[:]...) // SHA1 sum for the data chunk
 		crc = crc64.Checksum(nd[p:], crctbl)
-		nd = l0.Pint64(crc, nd)					// CRC64 of the superblock
+		nd = l0.Pint64(crc, nd) // CRC64 of the superblock
 
 		data = data[sz:]
 	}
@@ -256,26 +269,26 @@ func (c *Codec) addSupers(data []byte) (nd []byte, super []byte) {
 func (c *Codec) Decode(start, end uint64, oligos []oligo.Oligo) (data []DataExtent) {
 	// spin up goroutines to decode
 	ch := make(chan oligo.Oligo)
-	f := newFile(c.dseqnum + c.rseqnum, c.c1.BlockNum(), c.c1.BlockSize(), c.rseqnum, c.ec, c.compat, c.rndmz)
+	f := newFile(c.dseqnum+c.rseqnum, c.c1.BlockNum(), c.c1.BlockSize(), c.rseqnum, c.ec, c.compat, c.rndmz)
 	nprocs := runtime.NumCPU()
 	for i := 0; i < nprocs; i++ {
 		go func() {
 			blknum := c.c1.BlockNum()
 			dblks := make([]Blk, blknum)
 			for {
-//				fmt.Fprintf(os.Stderr, "waiting\n")
-				ol := <- ch
+				//				fmt.Fprintf(os.Stderr, "waiting\n")
+				ol := <-ch
 				if ol == nil {
 					break
 				}
 
 				addr, ef, data, err := c.c1.Decode(c.p5, c.p3, ol, 1)
 				if err != nil {
-//					fmt.Fprintf(os.Stderr, "--- ? ? %v %v\n", ol, err)
+					//					fmt.Fprintf(os.Stderr, "--- ? ? %v %v\n", ol, err)
 					continue
 				}
 
-//				fmt.Fprintf(os.Stderr, "--- %d %v %v\n", addr, ef, ol)
+				//				fmt.Fprintf(os.Stderr, "--- %d %v %v\n", addr, ef, ol)
 				if addr < start || addr > end {
 					continue
 				}
@@ -285,16 +298,16 @@ func (c *Codec) Decode(start, end uint64, oligos []oligo.Oligo) (data []DataExte
 					dblks[i].n = 1
 				}
 
-				f.add(addr - start, ef, dblks)
+				f.add(addr-start, ef, dblks)
 			}
 		}()
 	}
 
 	// feed the oligos in the order we got them
 	for i, ol := range oligos {
-//		fmt.Fprintf(os.Stderr, "sending %v\n", ol)
+		//		fmt.Fprintf(os.Stderr, "sending %v\n", ol)
 		ch <- ol
-		if i != 0 && i%100000==0 {
+		if i != 0 && i%100000 == 0 {
 			if f.sync() {
 				// we got the whole file, no need to continue
 				break
@@ -321,15 +334,15 @@ func (c *Codec) DecodeVerbose(start, end uint64, oligos []oligo.Oligo) (data []D
 
 	// spin up goroutines to decode
 	ch := make(chan oligo.Oligo)
-	f := newFile(c.dseqnum + c.rseqnum, c.c1.BlockNum(), c.c1.BlockSize(), c.rseqnum, c.ec, c.compat, c.rndmz)
+	f := newFile(c.dseqnum+c.rseqnum, c.c1.BlockNum(), c.c1.BlockSize(), c.rseqnum, c.ec, c.compat, c.rndmz)
 	nprocs := runtime.NumCPU()
 	for i := 0; i < nprocs; i++ {
 		go func() {
 			blknum := c.c1.BlockNum()
 			dblks := make([]Blk, blknum)
 			for {
-//				fmt.Fprintf(os.Stderr, "waiting\n")
-				ol := <- ch
+				//				fmt.Fprintf(os.Stderr, "waiting\n")
+				ol := <-ch
 				if ol == nil {
 					break
 				}
@@ -362,12 +375,12 @@ func (c *Codec) DecodeVerbose(start, end uint64, oligos []oligo.Oligo) (data []D
 					oaddr = -oaddr
 				}
 
-				a := ecgrp * uint64(c.dseqnum + c.rseqnum) + ecrow
-				o := oaddr * int64(c.dblknum * 4)
+				a := ecgrp*uint64(c.dseqnum+c.rseqnum) + ecrow
+				o := oaddr * int64(c.dblknum*4)
 				cnum := o / (superSize + superChunkSize)
 				off := int64(-1)
-				if o >= superSize + cnum * (superSize + superChunkSize) {
-					off = o - (cnum + 1) * superSize
+				if o >= superSize+cnum*(superSize+superChunkSize) {
+					off = o - (cnum+1)*superSize
 				}
 
 				lck.Lock()
@@ -390,9 +403,9 @@ func (c *Codec) DecodeVerbose(start, end uint64, oligos []oligo.Oligo) (data []D
 
 	// feed the oligos in the order we got them
 	for i, ol := range oligos {
-//		fmt.Fprintf(os.Stderr, "sending %v\n", ol)
+		//		fmt.Fprintf(os.Stderr, "sending %v\n", ol)
 		ch <- ol
-		if i != 0 && i%100000==0 {
+		if i != 0 && i%100000 == 0 {
 			if f.sync() {
 				// we got the whole file, no need to continue
 				break
@@ -406,48 +419,48 @@ func (c *Codec) DecodeVerbose(start, end uint64, oligos []oligo.Oligo) (data []D
 	}
 
 	data = f.close()
-//	if c.verbose {
-//		f.dumpECGroups()
-//	}
+	//	if c.verbose {
+	//		f.dumpECGroups()
+	//	}
 
 	fmt.Fprintf(os.Stderr, "%d extents\n", len(data))
 
-/*
-	if c.verbose {
-//		for k, _ := range failed {
-//			fmt.Printf("-1 %s\n", k)
-//		}
+	/*
+	   	if c.verbose {
+	   //		for k, _ := range failed {
+	   //			fmt.Printf("-1 %s\n", k)
+	   //		}
 
-		sort.Slice(olist, func(i, j int) bool {
-			return olist[i].addr < olist[j].addr
-		})
+	   		sort.Slice(olist, func(i, j int) bool {
+	   			return olist[i].addr < olist[j].addr
+	   		})
 
-		idx := 0
-		for _, de := range data {
-			end := de.Offset + uint64(len(de.Data))
-			fmt.Printf("** start %d end %d verified %v\n", de.Offset, end, de.Verified)
+	   		idx := 0
+	   		for _, de := range data {
+	   			end := de.Offset + uint64(len(de.Data))
+	   			fmt.Printf("** start %d end %d verified %v\n", de.Offset, end, de.Verified)
 
-			for; idx < len(olist); idx++ {
-				r := &olist[idx]
-				off := r.addr * uint64(c.dblknum * 4)
-				if off > end {
-					break
-				}
+	   			for; idx < len(olist); idx++ {
+	   				r := &olist[idx]
+	   				off := r.addr * uint64(c.dblknum * 4)
+	   				if off > end {
+	   					break
+	   				}
 
-				n := 0
-				for _, d := range r.data {
-					if d != nil {
-						n++
-					}
-				}
+	   				n := 0
+	   				for _, d := range r.data {
+	   					if d != nil {
+	   						n++
+	   					}
+	   				}
 
-				if n > 0 {
-					fmt.Printf("%d %d %d %d %v %v\n", r.addr, r.ecgrp, r.ecrow, r.lvl, r.data, r.ol)
-				}
-			}
-		}
-	}
-*/
+	   				if n > 0 {
+	   					fmt.Printf("%d %d %d %d %v %v\n", r.addr, r.ecgrp, r.ecrow, r.lvl, r.data, r.ol)
+	   				}
+	   			}
+	   		}
+	   	}
+	*/
 	return
 }
 

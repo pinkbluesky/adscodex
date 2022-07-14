@@ -1,14 +1,14 @@
 package main
 
 import (
+	"adscodex/l0"
+	"adscodex/l1"
+	"adscodex/l2"
+	"adscodex/oligo/long"
 	"flag"
 	"fmt"
 	"math/rand"
 	"os"
-	"adscodex/oligo/long"
-	"adscodex/l0"
-	"adscodex/l1"
-	"adscodex/l2"
 )
 
 var p5str = flag.String("p5", "CGACATCTCGATGGCAGCAT", "5'-end primer")
@@ -26,6 +26,7 @@ var rndomize = flag.Bool("rndmz", false, "randomze data")
 var shuffle = flag.Int("shuffle", 0, "random seed for shuffling the order of the oligos (0 disable)")
 var start = flag.Uint64("addr", 0, "start address")
 var tblpath = flag.String("tbl", "", "path to the tables")
+var rndseed = flag.Uint64("rndseed", 0, "random seed for PNRG")
 
 func main() {
 	flag.Parse()
@@ -54,12 +55,12 @@ func main() {
 	cdc.SetCompat(*compat)
 
 	if flag.NArg() != 1 {
-		fmt.Printf("Expecting file name\n");
+		fmt.Printf("Expecting file name\n")
 		return
 	}
 
 	var mc, dc int
-	switch  *mdcsum {
+	switch *mdcsum {
 	default:
 		fmt.Printf("Invalid metadata checksum type\n")
 		return
@@ -76,7 +77,7 @@ func main() {
 		return
 	}
 
-	switch  *dtcsum {
+	switch *dtcsum {
 	default:
 		fmt.Printf("Invalid data checksum type: %s\n", *dtcsum)
 		return
@@ -95,6 +96,10 @@ func main() {
 
 	cdc.SetRandomize(*rndomize)
 
+	// Set codec random seed
+	cdc.SetRandomSeed(*rndseed)
+
+	// Open data file
 	f, err := os.Open(flag.Arg(0))
 	if err != nil {
 		fmt.Printf("Error opening the file: %v\n", err)
@@ -102,6 +107,7 @@ func main() {
 	}
 	defer f.Close()
 
+	// Read data file
 	st, _ := f.Stat()
 	data := make([]byte, st.Size())
 	for b := data; len(b) != 0; {
@@ -114,7 +120,7 @@ func main() {
 		b = b[n:]
 	}
 
-	lastaddr, oligos, err := cdc.Encode(*start, data)
+	lastaddr, oligos, err := cdc.Encode(*start, data) // HERE
 	if err != nil {
 		fmt.Printf("Error while encoding: %v\n", err)
 		return
@@ -122,13 +128,13 @@ func main() {
 
 	if *shuffle != 0 {
 		rand.Seed(int64(*shuffle))
-		rand.Shuffle(len(oligos),  func (i, j int) {
+		rand.Shuffle(len(oligos), func(i, j int) {
 			oligos[i], oligos[j] = oligos[j], oligos[i]
 		})
 	}
 
 	fmt.Fprintf(os.Stderr, "Address: %v::%v\n", *start, lastaddr)
 	for i, ol := range oligos {
-		fmt.Printf("%v,L%d\n", ol, uint64(i) + *start)
+		fmt.Printf("%v,L%d\n", ol, uint64(i)+*start)
 	}
 }
