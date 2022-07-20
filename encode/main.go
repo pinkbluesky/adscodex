@@ -26,7 +26,8 @@ var rndomize = flag.Bool("rndmz", false, "randomze data")
 var shuffle = flag.Int("shuffle", 0, "random seed for shuffling the order of the oligos (0 disable)")
 var start = flag.Uint64("addr", 0, "start address")
 var tblpath = flag.String("tbl", "", "path to the tables")
-var rndseed = flag.Uint64("rndseed", 0, "random seed for PNRG")
+var rndseed = flag.Uint64("rndseed", 0, "random seed for PNRG (0 to use default seed)")
+var printfmt = flag.Int("printfmt", 0, "print format") // default 0; use 1 for nupack print format
 
 func main() {
 	flag.Parse()
@@ -134,7 +135,17 @@ func main() {
 	}
 
 	fmt.Fprintf(os.Stderr, "Address: %v::%v\n", *start, lastaddr)
+
+	// if formatting for nupack, first line is number of strands
+	if *printfmt == 1 {
+		fmt.Printf("%v\n", len(oligos))
+	}
+
 	for i, ol := range oligos {
-		fmt.Printf("%v,L%d\n", ol, uint64(i)+*start)
+		if *printfmt == 0 {
+			fmt.Printf("%v,L%d\n", ol, uint64(i)+*start) // to stdout
+		} else if *printfmt == 1 {
+			fmt.Printf("%v\n", ol)
+		}
 	}
 }
