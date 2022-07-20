@@ -5,9 +5,7 @@ import os
 data_path = os.path.expanduser('~') + "/1kfilerand"
 prefix_path = os.path.expanduser('~') + "/mfes/ads"
 
-def dna_path(seed):
-    # return a path to the encoded dna file that includes the random seed used
-    return os.path.expanduser('~') + "/dna" + str(seed) + ".out"
+dna_path = os.path.expanduser('~') + "/dna.out" # + "/dna" + str(seed) + ".out"
 
 def run(command):
     subprocess.run(command, shell=True) #, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -27,11 +25,13 @@ def output_path():
 
 
 def run_mfes(seed):
-    print(dna_path(seed) + "\n")
     # clear the file. run encoder
-    run("> {}".format(dna_path(seed)))
-    run("go run encode/main.go -tbl tbl -printfmt 1 -rndseed {} {} >> {}".format(seed, data_path, dna_path(seed)))
-    run("mv {} {}".format(dna_path(seed), input_path())) # copy output file into suitable location
+    run("> {}".format(dna_path))
+    print("go run encode")
+    run("go run encode/main.go -tbl tbl -printfmt 1 -rndmz -rndseed {} {} >> {}".format(seed, data_path, dna_path))
+    print("mv")
+    run("mv {} {}".format(dna_path, input_path())) # copy output file into suitable location
+    print("mfes")
     run("mfes -material dna -multi {}".format(prefix_path))
 
     # read the output file
