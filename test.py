@@ -1,8 +1,9 @@
 # Run in adscodex directory
 import subprocess
 import os
+import time
 
-data_path = os.path.expanduser('~') + "/1kfilerand"
+data_path = os.path.expanduser('~') + "/16kfilerand"
 prefix_path = os.path.expanduser('~') + "/mfes/ads"
 
 dna_path = os.path.expanduser('~') + "/dna.out" # + "/dna" + str(seed) + ".out"
@@ -28,9 +29,7 @@ def run_mfes(seed):
     # clear the file. run encoder
     run("> {}".format(dna_path))
     print("go run encode")
-    run("go run encode/main.go -tbl tbl -printfmt 1 -rndmz -rndseed {} {} >> {}".format(seed, data_path, dna_path))
-    print("mv")
-    run("mv {} {}".format(dna_path, input_path())) # copy output file into suitable location
+    run("go run encode/main.go -tbl tbl -printfmt 1 -rndmz -rndseed {} {} >> {}".format(seed, data_path, input_path()))
     print("mfes")
     run("mfes -material dna -multi {}".format(prefix_path))
 
@@ -46,14 +45,17 @@ def main():
 
     subprocess.run("echo running random seed tests...", shell=True)
 
-    seeds = [50, 1111]
+    seeds = [50]
     mfes = []
+    times = []
 
     for s in seeds:
+        start = time.time()
         mfes.append(run_mfes(s))
+        times.append(time.time() - start)
         
     for i in range(len(seeds)):
-        print("seed {}: {} kcal/L".format(seeds[i], mfes[i]))
+        print("seed {}: {} kcal/L, time elapsed: {} sec".format(seeds[i], mfes[i], times[i]))
 
 
 if __name__ == "__main__":
