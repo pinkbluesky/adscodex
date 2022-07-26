@@ -60,9 +60,11 @@ def main():
         mfe_times.append(mfe_time)
         times.append(time.time() - start)
         
+    print("seed, mfe sum\n")
+        
     for i in range(len(seeds)):
-        print("seed {}: {} kcal/L\ntime elapsed: {} sec, mfe time elapsed; {} sec".format(seeds[i], mfes[i], times[i], mfe_times[i]))
-
+        # print("seed {}: {} kcal/L\ntime elapsed: {} sec, mfe time elapsed; {} sec".format(seeds[i], mfes[i], times[i], mfe_times[i]))
+        print("{} {}".format(seeds[i], mfes[i]))
 
 if __name__ == "__main__":
     main()
