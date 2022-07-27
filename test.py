@@ -29,11 +29,12 @@ def run_mfes(seed):
     print("random seed {}".format(seed))
     # clear the file. run encoder
     run("> {}".format(input_path(seed)))
+    run("> {}".format(output_path(seed)))
     print("go run encode\n")
     run("go run encode/main.go -tbl tbl -printfmt 1 -rndmz -rndseed {} {} >> {}".format(seed, data_path, input_path(seed)))
     print("mfes... beginning timer\n")
     start = time.time()
-    run("mfes -material dna -multi {}".format(prefix_path + str(seed)))
+    run("mfes -material dna -multi {} >> {}".format(prefix_path, output_path(seed))) # pipe output to output file path
     mfe_time = time.time() - start
 
     return mfe_time
